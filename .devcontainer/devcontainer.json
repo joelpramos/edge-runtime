@@ -6,7 +6,8 @@
   },
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker:2": {},
-    "ghcr.io/jungaretti/features/make:1": {}
+    "ghcr.io/jungaretti/features/make:1": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0.5": {}
   },
   "runArgs": [
     "--env-file",
@@ -32,7 +33,8 @@
         "vadimcn.vscode-lldb",
         "denoland.vscode-deno",
         "dprint.dprint",
-        "editorconfig.editorconfig"
+        "editorconfig.editorconfig",
+        "anthropic.claude-code"
       ]
     }
   }
