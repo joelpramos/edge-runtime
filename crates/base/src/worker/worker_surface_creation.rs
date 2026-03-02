@@ -645,6 +645,7 @@ impl MainWorkerSurfaceBuilder {
       maybe_s3_fs_config: None,
       maybe_tmp_fs_config: None,
       maybe_otel_config: otel_config,
+      test_mode: false,
     }));
 
     Ok(MainWorkerSurface(
@@ -797,6 +798,7 @@ impl EventWorkerSurfaceBuilder {
       maybe_s3_fs_config: None,
       maybe_tmp_fs_config: None,
       maybe_otel_config: otel_config,
+      test_mode: false,
     }));
 
     Ok(EventWorkerSurface {

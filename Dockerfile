@@ -71,3 +71,12 @@ FROM edge-runtime-base as edge-runtime
 COPY --from=ort /root/onnxruntime/lib/libonnxruntime.so* /usr/lib
 
 ENTRYPOINT ["edge-runtime"]
+
+# Image for running tests with Docker CLI + Compose support
+FROM edge-runtime as edge-runtime-test
+
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker/compose-bin:latest /docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
+RUN ln -s /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
+
+ENTRYPOINT ["edge-runtime"]

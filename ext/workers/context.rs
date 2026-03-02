@@ -271,6 +271,7 @@ pub struct WorkerContextInitOpts {
   pub maybe_s3_fs_config: Option<S3FsConfig>,
   pub maybe_tmp_fs_config: Option<TmpFsConfig>,
   pub maybe_otel_config: Option<OtelConfig>,
+  pub test_mode: bool,
 }
 
 #[derive(Debug)]

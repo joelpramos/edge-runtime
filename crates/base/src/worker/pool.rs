@@ -422,6 +422,7 @@ impl WorkerPool {
                 maybe_s3_fs_config,
                 maybe_tmp_fs_config,
                 maybe_otel_config: otel_config,
+                test_mode: false,
               },
               tx,
             ))

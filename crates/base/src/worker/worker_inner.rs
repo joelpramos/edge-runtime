@@ -136,7 +136,7 @@ impl WorkerBuilder {
     self
   }
 
-  pub(crate) fn build(self) -> Result<Worker, Error> {
+  pub fn build(self) -> Result<Worker, Error> {
     let Self {
       mut init_opts,
       flags,
@@ -192,7 +192,7 @@ impl WorkerBuilder {
   }
 }
 
-pub(crate) struct Worker {
+pub struct Worker {
   pub(crate) imp: WorkerDriverImpl,
   pub(crate) cx: Arc<WorkerCx>,
   pub(crate) init_opts: Option<WorkerContextInitOpts>,

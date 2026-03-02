@@ -83,8 +83,82 @@ pub(super) fn get_cli() -> Command {
         .action(ArgAction::SetTrue),
     )
     .subcommand(get_start_command())
+    .subcommand(get_test_command())
     .subcommand(get_bundle_command())
     .subcommand(get_unbundle_command())
+}
+
+#[derive(ValueEnum, Default, Clone, Copy)]
+pub(super) enum TestWorkerKind {
+  #[default]
+  Main,
+  User,
+}
+
+#[derive(ValueEnum, Default, Clone, Copy)]
+pub(super) enum TestReporterKind {
+  #[default]
+  Pretty,
+  Junit,
+}
+
+pub(super) struct TestFlags {
+  pub paths: Vec<String>,
+  pub filter: Option<String>,
+  pub worker_kind: TestWorkerKind,
+  pub timeout_ms: u64,
+  pub fail_fast: bool,
+  pub reporter: TestReporterKind,
+  pub junit_path: Option<String>,
+  pub no_module_cache: bool,
+}
+
+fn get_test_command() -> Command {
+  Command::new("test")
+    .about("Run tests")
+    .arg(
+      clap::Arg::new("paths")
+        .help("Test file or directory paths")
+        .num_args(0..)
+        .default_value("."),
+    )
+    .arg(
+      arg!(--"filter" <PATTERN>)
+        .help("Run only tests whose name contains the pattern"),
+    )
+    .arg(
+      arg!(--"worker-kind" <KIND>)
+        .help("Worker context to run tests in")
+        .default_value("main")
+        .value_parser(value_parser!(TestWorkerKind)),
+    )
+    .arg(
+      arg!(--"timeout" <MS>)
+        .help("Per-test timeout in milliseconds")
+        .default_value("30000")
+        .value_parser(value_parser!(u64)),
+    )
+    .arg(
+      arg!(--"fail-fast")
+        .help("Stop execution after the first test failure")
+        .action(ArgAction::SetTrue),
+    )
+    .arg(
+      arg!(--"reporter" <FORMAT>)
+        .help("Output format")
+        .default_value("pretty")
+        .value_parser(value_parser!(TestReporterKind)),
+    )
+    .arg(
+      arg!(--"junit-path" <PATH>)
+        .help("Write JUnit XML to file (pretty reporter still outputs to stdout)"),
+    )
+    .arg(
+      arg!(--"disable-module-cache")
+        .help("Disable using module cache")
+        .default_value("false")
+        .value_parser(FalseyValueParser::new()),
+    )
 }
 
 fn get_start_command() -> Command {

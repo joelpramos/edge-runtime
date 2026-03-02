@@ -11,8 +11,8 @@ mod worker_surface_creation;
 pub use termination_token::TerminationToken;
 
 pub(crate) use worker_inner::DuplexStreamEntry;
-pub(crate) use worker_inner::Worker;
-pub(crate) use worker_inner::WorkerBuilder;
+pub use worker_inner::Worker;
+pub use worker_inner::WorkerBuilder;
 pub(crate) use worker_inner::WorkerCx;
 
 pub use worker_inner::WorkerSurface;

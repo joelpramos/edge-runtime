@@ -259,6 +259,7 @@ impl TestBedBuilder {
         maybe_s3_fs_config: None,
         maybe_tmp_fs_config: None,
         maybe_otel_config: None,
+        test_mode: false,
       })
       .build()
       .await

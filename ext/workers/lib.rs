@@ -274,6 +274,7 @@ pub async fn op_user_worker_create(
       maybe_s3_fs_config,
       maybe_tmp_fs_config,
       maybe_otel_config,
+      test_mode: false,
     };
 
     tx.send(UserWorkerMsgs::Create(user_worker_options, result_tx))?;
