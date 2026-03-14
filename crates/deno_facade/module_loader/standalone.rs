@@ -551,6 +551,7 @@ pub async fn create_module_loader_for_eszip(
   mut eszip: LazyLoadableEszip,
   permissions_options: PermissionsOptions,
   include_source_map: bool,
+  root_path_override: Option<PathBuf>,
 ) -> Result<RuntimeProviders, AnyError> {
   let migrated = eszip.migrated();
   let current_exe_path = std::env::current_exe().unwrap();
@@ -579,12 +580,15 @@ pub async fn create_module_loader_for_eszip(
   .transpose()?
   .unwrap_or_default();
 
-  let root_path = if cfg!(target_family = "unix") {
-    PathBuf::from("/var/tmp")
-  } else {
-    std::env::temp_dir()
-  }
-  .join(format!("sb-compile-{}", current_exe_name));
+  let root_path = match root_path_override {
+    Some(p) => p,
+    None => if cfg!(target_family = "unix") {
+      PathBuf::from("/var/tmp")
+    } else {
+      std::env::temp_dir()
+    }
+    .join(format!("sb-compile-{}", current_exe_name)),
+  };
 
   let node_modules = metadata.node_modules()?;
   let root_dir_url =
@@ -834,6 +838,7 @@ pub async fn create_module_loader_for_standalone_from_eszip_kind(
   permissions_options: PermissionsOptions,
   include_source_map: bool,
   options: Option<MigrateOptions>,
+  root_path_override: Option<PathBuf>,
 ) -> Result<RuntimeProviders, AnyError> {
   let eszip = migrate::try_migrate_if_needed(
     payload_to_eszip(eszip_payload_kind).await?,
@@ -841,6 +846,6 @@ pub async fn create_module_loader_for_standalone_from_eszip_kind(
   )
   .await?;
 
-  create_module_loader_for_eszip(eszip, permissions_options, include_source_map)
+  create_module_loader_for_eszip(eszip, permissions_options, include_source_map, root_path_override)
     .await
 }

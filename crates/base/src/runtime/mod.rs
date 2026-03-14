@@ -441,7 +441,7 @@ where
 {
   #[allow(clippy::unnecessary_literal_unwrap)]
   #[allow(clippy::arc_with_non_send_sync)]
-  pub(crate) async fn new(mut worker: Worker) -> Result<Self, Error> {
+  pub async fn new(mut worker: Worker) -> Result<Self, Error> {
     let init_opts = worker.init_opts.take();
     let flags = worker.flags.clone();
     let event_metadata = worker.event_metadata.clone();
@@ -461,6 +461,7 @@ where
       maybe_s3_fs_config,
       maybe_tmp_fs_config,
       maybe_otel_config,
+      test_mode,
       ..
     } = init_opts.unwrap();
 
@@ -625,6 +626,12 @@ where
           .and_then(serde_json::Value::as_bool)
           .unwrap_or_default();
 
+        let root_path_override = if test_mode {
+          Some(base_dir_path.clone())
+        } else {
+          None
+        };
+
         let rt_provider = create_module_loader_for_standalone_from_eszip_kind(
           eszip,
           permissions_options,
@@ -632,6 +639,7 @@ where
           Some(MigrateOptions {
             maybe_import_map_path,
           }),
+          root_path_override,
         )
         .await?;
 
@@ -1083,6 +1091,18 @@ where
             .now_or_never()
             .transpose()
             .context("failed to execute bootstrap script")?;
+
+          // Inject test bootstrap when test_mode is enabled
+          if test_mode {
+            static TEST_BOOTSTRAP_JS: &str =
+              include_str!("../../../../ext/runtime/js/test_bootstrap.js");
+            locker
+              .execute_script(
+                "[test_bootstrap]",
+                deno_core::ModuleCodeString::from_static(TEST_BOOTSTRAP_JS),
+              )
+              .context("failed to execute test bootstrap script")?;
+          }
         }
 
         // from this moment on, using `v8::Locker` is enforced.
@@ -1225,7 +1245,7 @@ where
     })
   }
 
-  pub(crate) async fn init_main_module(&mut self) -> Result<(), Error> {
+  pub async fn init_main_module(&mut self) -> Result<(), Error> {
     if self.main_module_id.is_some() {
       return Ok(());
     }
@@ -1274,6 +1294,107 @@ where
 
     self.main_module_id = Some(id);
     Ok(())
+  }
+
+
+  /// Evaluate the main module and run the event loop until completion.
+  /// Must be called after `init_main_module()`.
+  pub async fn evaluate_main_module(&mut self) -> Result<(), Error> {
+    let main_module_id = self
+      .main_module_id
+      .context("main module not initialized")?;
+
+    let handle = Handle::current();
+    let ret = unsafe {
+      spawn_blocking_non_send(|| {
+        handle.block_on(async {
+          self.assert_isolate_not_locked();
+          let mut locker = self.with_locker();
+          let mod_eval = locker.js_runtime.mod_evaluate(main_module_id);
+          locker
+            .js_runtime
+            .run_event_loop(PollEventLoopOptions::default())
+            .await?;
+          mod_eval.await?;
+          Ok::<_, Error>(())
+        })
+      })
+    }
+    .await;
+
+    match ret {
+      Ok(Ok(())) => Ok(()),
+      Ok(Err(err)) => Err(err),
+      Err(err) => Err(Error::from(err)),
+    }
+  }
+
+  /// Execute a script with the v8 locker held and optionally run the event loop.
+  /// This is needed after bootstrap since the isolate scope root is disposed.
+  pub async fn execute_script_with_locker(
+    &mut self,
+    name: &'static str,
+    code: String,
+    run_event_loop: bool,
+  ) -> Result<v8::Global<v8::Value>, Error> {
+    let handle = Handle::current();
+    let ret = unsafe {
+      spawn_blocking_non_send(|| {
+        handle.block_on(async {
+          self.assert_isolate_not_locked();
+          let mut locker = self.with_locker();
+          let result = locker
+            .js_runtime
+            .execute_script(name, code)
+            .context("failed to execute script")?;
+          if run_event_loop {
+            locker
+              .js_runtime
+              .run_event_loop(PollEventLoopOptions::default())
+              .await?;
+          }
+          Ok::<_, Error>(result)
+        })
+      })
+    }
+    .await;
+
+    match ret {
+      Ok(Ok(v)) => Ok(v),
+      Ok(Err(err)) => Err(err),
+      Err(err) => Err(Error::from(err)),
+    }
+  }
+
+  /// Read a v8 global value as a Rust string with the v8 locker held.
+  pub async fn read_global_as_string(
+    &mut self,
+    global: v8::Global<v8::Value>,
+  ) -> Result<String, Error> {
+    let handle = Handle::current();
+    let ret = unsafe {
+      spawn_blocking_non_send(|| {
+        handle.block_on(async {
+          self.assert_isolate_not_locked();
+          let mut locker = self.with_locker();
+          let scope = &mut locker.js_runtime.handle_scope();
+          let local = v8::Local::new(scope, global);
+          Ok::<_, Error>(
+            local
+              .to_string(scope)
+              .map(|s| s.to_rust_string_lossy(scope))
+              .unwrap_or_default(),
+          )
+        })
+      })
+    }
+    .await;
+
+    match ret {
+      Ok(Ok(v)) => Ok(v),
+      Ok(Err(err)) => Err(err),
+      Err(err) => Err(Error::from(err)),
+    }
   }
 
   pub async fn run(&mut self, options: RunOptions) -> (Result<(), Error>, i64) {
@@ -2416,6 +2537,7 @@ mod test {
             maybe_s3_fs_config: s3_fs_config,
             maybe_tmp_fs_config: tmp_fs_config,
             maybe_otel_config: None,
+            test_mode: false,
           },
           Arc::default(),
         )
@@ -2521,6 +2643,7 @@ mod test {
           maybe_s3_fs_config: None,
           maybe_tmp_fs_config: None,
           maybe_otel_config: None,
+          test_mode: false,
         },
         Arc::default(),
       )
@@ -2596,6 +2719,7 @@ mod test {
           maybe_s3_fs_config: None,
           maybe_tmp_fs_config: None,
           maybe_otel_config: None,
+          test_mode: false,
         },
         Arc::default(),
       )
@@ -2685,6 +2809,7 @@ mod test {
           maybe_s3_fs_config: None,
           maybe_tmp_fs_config: None,
           maybe_otel_config: None,
+          test_mode: false,
         },
         Arc::default(),
       )

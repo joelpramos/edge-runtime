@@ -77,6 +77,24 @@ pub mod error;
 pub mod migrate;
 pub mod vfs;
 
+/// Clamp the resolved root dir URL so it never goes above the workspace root.
+///
+/// `resolve_root_dir_from_specifiers` goes up one parent directory for
+/// "context", which can cause a mismatch with the loading side when the
+/// workspace root is already a top-level directory (e.g. `/functions/`
+/// in Docker). In that case the resolved root becomes `/`, causing
+/// path-doubling and a `node_resolver` panic.
+pub(crate) fn clamp_root_dir_to_workspace(
+    workspace_root: &Url,
+    resolved: Url,
+) -> Url {
+    if workspace_root.as_str().starts_with(resolved.as_str()) {
+        workspace_root.clone()
+    } else {
+        resolved
+    }
+}
+
 const READ_ALL_BARRIER_MAX_PERMITS: usize = 10;
 
 #[derive(Debug)]
@@ -762,15 +780,23 @@ pub async fn generate_binary_eszip(
   )
   .unwrap();
 
-  let root_dir_url = compile::resolve_root_dir_from_specifiers(
-    emitter_factory.deno_options()?.workspace().root_dir(),
-    graph.specifiers().map(|(s, _)| s).chain(
-      deno_options
-        .node_modules_dir_path()
-        .and_then(|it| ModuleSpecifier::from_directory_path(it).ok())
-        .iter(),
-    ),
-  );
+  let root_dir_url = {
+    let workspace_root = emitter_factory
+      .deno_options()?
+      .workspace()
+      .root_dir()
+      .clone();
+    let resolved = compile::resolve_root_dir_from_specifiers(
+      &workspace_root,
+      graph.specifiers().map(|(s, _)| s).chain(
+        deno_options
+          .node_modules_dir_path()
+          .and_then(|it| ModuleSpecifier::from_directory_path(it).ok())
+          .iter(),
+      ),
+    );
+    clamp_root_dir_to_workspace(&workspace_root, resolved)
+  };
   let root_dir_url = EszipRelativeFileBaseUrl::new(&root_dir_url);
   let root_path = root_dir_url.inner().to_file_path().unwrap();
 
@@ -1226,4 +1252,70 @@ pub async fn extract_eszip(payload: ExtractEszipPayload) -> bool {
       panic!("Path seems to be invalid");
     }
   }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deno::tools::compile;
+    use deno_core::url::Url;
+
+    #[test]
+    fn test_clamp_at_filesystem_root() {
+        // Docker scenario: workspace=/functions/, resolved=/ (one parent up)
+        let workspace = Url::parse("file:///functions/").unwrap();
+        let resolved = Url::parse("file:///").unwrap();
+        let result = clamp_root_dir_to_workspace(&workspace, resolved);
+        assert_eq!(result.as_str(), "file:///functions/");
+    }
+
+    #[test]
+    fn test_clamp_nested_workspace() {
+        // workspace=/home/user/project/, resolved=/home/user/ (one parent up)
+        let workspace = Url::parse("file:///home/user/project/").unwrap();
+        let resolved = Url::parse("file:///home/user/").unwrap();
+        let result = clamp_root_dir_to_workspace(&workspace, resolved);
+        assert_eq!(result.as_str(), "file:///home/user/project/");
+    }
+
+    #[test]
+    fn test_clamp_passthrough_when_outside() {
+        // Specifiers exist outside workspace → resolved is wider → don't clamp
+        let workspace = Url::parse("file:///home/user/project/").unwrap();
+        let resolved = Url::parse("file:///other/path/").unwrap();
+        let result = clamp_root_dir_to_workspace(&workspace, resolved);
+        assert_eq!(result.as_str(), "file:///other/path/");
+    }
+
+    #[test]
+    fn test_resolve_then_clamp_docker_scenario() {
+        // End-to-end: resolve_root_dir_from_specifiers goes up one parent,
+        // then clamp brings it back to workspace root
+        let workspace = Url::parse("file:///functions/").unwrap();
+        let specifier = Url::parse("file:///functions/hello/index.ts").unwrap();
+        let resolved = compile::resolve_root_dir_from_specifiers(
+            &workspace,
+            [&specifier].into_iter(),
+        );
+        // resolve_root_dir_from_specifiers goes up one parent → file:///
+        assert_eq!(resolved.as_str(), "file:///");
+        // Clamp brings it back to workspace root
+        let clamped = clamp_root_dir_to_workspace(&workspace, resolved);
+        assert_eq!(clamped.as_str(), "file:///functions/");
+    }
+
+    #[test]
+    fn test_resolve_then_clamp_deep_workspace() {
+        // When workspace is deep enough, resolve stays within workspace
+        let workspace = Url::parse("file:///home/user/project/").unwrap();
+        let spec1 = Url::parse("file:///home/user/project/src/main.ts").unwrap();
+        let spec2 = Url::parse("file:///home/user/project/lib/util.ts").unwrap();
+        let resolved = compile::resolve_root_dir_from_specifiers(
+            &workspace,
+            [&spec1, &spec2].into_iter(),
+        );
+        // Goes up one parent from /home/user/project/ → /home/user/
+        let clamped = clamp_root_dir_to_workspace(&workspace, resolved);
+        assert_eq!(clamped.as_str(), "file:///home/user/project/");
+    }
 }

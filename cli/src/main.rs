@@ -35,11 +35,15 @@ use flags::get_cli;
 use flags::EszipV2ChecksumKind;
 use flags::OtelConsoleConfig;
 use flags::OtelKind;
+use flags::TestFlags;
+use flags::TestReporterKind;
+use flags::TestWorkerKind;
 use log::warn;
 use tokio::time::timeout;
 
 mod env;
 mod flags;
+mod tools;
 
 #[cfg(not(feature = "tracing"))]
 mod logger;
@@ -315,6 +319,65 @@ fn main() -> Result<ExitCode, anyhow::Error> {
         maybe_received_signum_or_exit_code
           .map(|it| it.map_left(|it| ExitCode::from(it as u8)).into_inner())
           .unwrap_or_default()
+      }
+
+      Some(("test", sub_matches)) => {
+        let paths = sub_matches
+          .get_many::<String>("paths")
+          .unwrap()
+          .cloned()
+          .collect::<Vec<_>>();
+
+        let filter = sub_matches.get_one::<String>("filter").cloned();
+
+        let worker_kind = sub_matches
+          .get_one::<TestWorkerKind>("worker-kind")
+          .copied()
+          .unwrap();
+
+        let timeout_ms = sub_matches
+          .get_one::<u64>("timeout")
+          .copied()
+          .unwrap();
+
+        let fail_fast = sub_matches.get_flag("fail-fast");
+
+        let reporter = sub_matches
+          .get_one::<TestReporterKind>("reporter")
+          .copied()
+          .unwrap();
+
+        let junit_path = sub_matches.get_one::<String>("junit-path").cloned();
+
+        let no_module_cache = sub_matches
+          .get_one::<bool>("disable-module-cache")
+          .cloned()
+          .unwrap();
+
+        let test_flags = TestFlags {
+          paths,
+          filter,
+          worker_kind,
+          timeout_ms,
+          fail_fast,
+          reporter,
+          junit_path,
+          no_module_cache,
+        };
+
+        match tools::test::run_tests(test_flags).await {
+          Ok(success) => {
+            if success {
+              ExitCode::SUCCESS
+            } else {
+              ExitCode::FAILURE
+            }
+          }
+          Err(err) => {
+            eprintln!("error: {:#}", err);
+            ExitCode::FAILURE
+          }
+        }
       }
 
       Some(("bundle", sub_matches)) => {
